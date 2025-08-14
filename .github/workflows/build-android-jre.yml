@@ -1,4 +1,4 @@
-name: Build Android JRE (aarch64)
+name: Build Android JRE (aarch64, JDK 17)
 
 on:
   workflow_dispatch:
@@ -17,9 +17,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config gawk gperf make cmake \
-            zip unzip curl xz-utils python2 git ccache zlib1g-dev
+            zip unzip curl xz-utils wget python2 git ccache zlib1g-dev
 
-      - name: Download NDK r10e (retry + fallback mirrors)
+      - name: Download NDK r10e (retry + validate)
         run: |
           set -euxo pipefail
           cd "$RUNNER_TEMP"
@@ -34,7 +34,7 @@ jobs:
             rm -f ndk.zip || true
             if curl -fL --retry 5 --retry-connrefused --retry-delay 2 -o ndk.zip "$u"; then
               if unzip -tq ndk.zip > /dev/null 2>&1; then
-                echo "Downloaded a valid zip from $u"
+                echo "Valid zip from $u"
                 success=1
                 break
               fi
@@ -47,7 +47,7 @@ jobs:
           unzip -q ndk.zip
           echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r10e" >> "$GITHUB_ENV"
 
-      - name: Force NDK scripts to python2
+      - name: Force NDK toolchain script to python2
         run: |
           set -euxo pipefail
           if [ -f "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" ]; then
@@ -73,7 +73,7 @@ jobs:
           PYTHON: /usr/bin/python2
         run: |
           set -euxo pipefail
-          ./extractndk.sh
+          # We already downloaded and extracted the NDK, so do not run ./extractndk.sh
           ./maketoolchain.sh
           ./getlibs.sh
           ./buildlibs.sh
