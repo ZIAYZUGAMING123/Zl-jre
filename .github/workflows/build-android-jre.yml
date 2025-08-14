@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config gawk gperf make cmake \
             zip unzip curl xz-utils wget python2 git ccache zlib1g-dev
-          # Python 2 headers (best-effort, may not exist on 22.04)
+          # Best-effort Python2 headers (may be unavailable on 22.04)
           sudo apt-get install -y libpython2.7-dev || true
 
       - name: Download NDK r10e (retry + validate)
@@ -59,11 +59,8 @@ jobs:
           # Place NDK where scripts expect it
           rm -rf build-android-jdk/android-ndk-r10e
           ln -s "$ANDROID_NDK_HOME" build-android-jdk/android-ndk-r10e
-          # Force old NDK standalone toolchain script to use python2
-          for f in \
-            "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" \
-            "build-android-jdk/android-ndk-r10e/build/tools/make-standalone-toolchain.sh"
-          do
+          # Force old NDK tool to python2
+          for f in "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" "build-android-jdk/android-ndk-r10e/build/tools/make-standalone-toolchain.sh"; do
             if [ -f "$f" ]; then
               sed -i 's@/usr/bin/env python@/usr/bin/env python2@' "$f" || true
               sed -i 's/\<python\>/python2/g' "$f" || true
@@ -71,17 +68,17 @@ jobs:
             fi
           done
 
-          # Provide expected python2.7 headers/libs in NDK prebuilt host path (compat shim)
+          # Provide expected python2.7 headers/libs in NDK prebuilt host path
           host_prebuilt="$ANDROID_NDK_HOME/prebuilt/linux-x86_64"
           mkdir -p "$host_prebuilt/include" "$host_prebuilt/lib"
-          # headers
+          # Headers
           if [ -d /usr/include/python2.7 ]; then
             ln -sfn /usr/include/python2.7 "$host_prebuilt/include/python2.7"
           else
             mkdir -p "$host_prebuilt/include/python2.7"
           fi
           (cd "$host_prebuilt/include" && ln -sfn python2.7 python22.7)
-          # libs
+          # Libs
           mkdir -p "$host_prebuilt/lib/python2.7"
           if [ -f /usr/lib/x86_64-linux-gnu/libpython2.7.so ]; then
             ln -sfn /usr/lib/x86_64-linux-gnu/libpython2.7.so "$host_prebuilt/lib/python2.7/libpython2.7.so"
@@ -90,6 +87,15 @@ jobs:
           fi
           (cd "$host_prebuilt/lib" && ln -sfn python2.7 python22.7)
           ls -la "$host_prebuilt/include" "$host_prebuilt/lib" || true
+
+      - name: Disable X11/headful in OpenJDK configure (patch build script)
+        working-directory: build-android-jdk
+        run: |
+          set -euxo pipefail
+          # Append headless/X11 flags to every 'bash configure' invocation in buildjdk.sh
+          sed -i 's/bash configure\b/& --with-x=no --with-headless-only=yes/' buildjdk.sh
+          echo "Patched configure line(s):"
+          grep -n "bash configure" buildjdk.sh || true
 
       - name: Build JDK 17 (aarch64)
         working-directory: build-android-jdk
@@ -105,7 +111,7 @@ jobs:
           PYTHON: /usr/bin/python2
         run: |
           set -euxo pipefail
-          # NDK already present and linked; skip extractndk.sh
+          # Do NOT run ./extractndk.sh (NDK already provided)
           ./maketoolchain.sh
           ./getlibs.sh
           ./buildlibs.sh
@@ -113,6 +119,7 @@ jobs:
           ./buildjdk.sh
           ./removejdkdebuginfo.sh
           ./tarjdk.sh
+          echo "Listing build outputs (if present):"
           ls -lah out || true
           ls -lah images || true
 
