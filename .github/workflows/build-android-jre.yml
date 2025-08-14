@@ -15,23 +15,49 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool pkg-config gawk gperf make cmake zip unzip curl xz-utils python2 git ccache zlib1g-dev
+          sudo apt-get install -y \
+            build-essential autoconf automake libtool pkg-config gawk gperf make cmake \
+            zip unzip curl xz-utils python2 git ccache zlib1g-dev
 
-      - name: Download NDK r10e
+      - name: Download NDK r10e (retry + fallback mirrors)
         run: |
-          cd $RUNNER_TEMP
-          curl -L -o ndk.zip https://dl.google.com/android/ndk/android-ndk-r10e-linux-x86_64.zip
+          set -euxo pipefail
+          cd "$RUNNER_TEMP"
+          urls=(
+            "https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip"
+            "https://dl.google.com/android/ndk/android-ndk-r10e-linux-x86_64.zip"
+            "https://archive.org/download/android-ndk-r10e/android-ndk-r10e-linux-x86_64.zip"
+          )
+          success=0
+          for u in "${urls[@]}"; do
+            echo "Trying $u"
+            rm -f ndk.zip || true
+            if curl -fL --retry 5 --retry-connrefused --retry-delay 2 -o ndk.zip "$u"; then
+              if unzip -tq ndk.zip > /dev/null 2>&1; then
+                echo "Downloaded a valid zip from $u"
+                success=1
+                break
+              fi
+            fi
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Failed to download a valid NDK r10e archive from all sources" >&2
+            exit 1
+          fi
           unzip -q ndk.zip
-          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r10e" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r10e" >> "$GITHUB_ENV"
+
+      - name: Force NDK scripts to python2
+        run: |
+          set -euxo pipefail
+          if [ -f "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" ]; then
+            sed -i 's@/usr/bin/env python@/usr/bin/env python2@' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
+            sed -i 's/\<python\>/python2/g' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
+          fi
 
       - name: Clone Android OpenJDK build scripts
         run: |
           git clone --depth=1 https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch.git build-android-jdk
-
-      - name: Force NDK to use Python 2 (needed on Ubuntu 22.04)
-        run: |
-          sed -i 's@/usr/bin/env python@/usr/bin/env python2@' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
-          sed -i 's/\<python\>/python2/g' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
 
       - name: Build JDK 17 (aarch64)
         working-directory: build-android-jdk
@@ -65,3 +91,4 @@ jobs:
           path: |
             build-android-jdk/out/**
             build-android-jdk/images/**
+            
