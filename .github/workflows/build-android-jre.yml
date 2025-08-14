@@ -1,0 +1,80 @@
+name: Build Android JRE
+
+on:
+  workflow_dispatch:
+    inputs:
+      jdk_major:
+        description: 'JDK major (17 or 21)'
+        required: true
+        default: '17'
+  push:
+    paths:
+      - '.github/workflows/build-android-jre.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        abi:
+          - { target: 'aarch64-linux-android', target_jdk: 'aarch64',  android_api: '21', jvm_variant: 'server' }
+          - { target: 'arm-linux-androideabi', target_jdk: 'arm',      android_api: '16', jvm_variant: 'client' }
+          - { target: 'x86_64-linux-android',  target_jdk: 'x86_64',   android_api: '21', jvm_variant: 'server' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential autoconf automake libtool pkg-config gawk gperf make cmake \
+            zip unzip curl xz-utils python2 python-is-python2 git ccache zlib1g-dev
+
+      - name: Download NDK r10e
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -L -o ndk.zip https://dl.google.com/android/ndk/android-ndk-r10e-linux-x86_64.zip
+          unzip -q ndk.zip
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r10e" >> "$GITHUB_ENV"
+
+      - name: Get Android OpenJDK build scripts
+        run: |
+          git clone --depth=1 https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch.git build-android-jdk
+
+      - name: Build JDK
+        working-directory: build-android-jdk
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          TARGET: ${{ matrix.abi.target }}
+          TARGET_JDK: ${{ matrix.abi.target_jdk }}
+          ANDROID_API_LEVEL: ${{ matrix.abi.android_api }}
+          JDK_DEBUG_LEVEL: release
+          JVM_VARIANTS: ${{ matrix.abi.jvm_variant }}
+          BUILD_FREETYPE_VERSION: 2.10.4
+          JDK_MAJOR: ${{ github.event.inputs.jdk_major || '17' }}
+        run: |
+          set -euxo pipefail
+          ./extractndk.sh
+          ./maketoolchain.sh
+          ./getlibs.sh
+          ./buildlibs.sh
+          ./clonejdk.sh
+          ./buildjdk.sh
+          ./removejdkdebuginfo.sh
+          ./tarjdk.sh
+          echo "Listing build outputs (if present):"
+          ls -lah out || true
+          ls -lah images || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jre-${{ matrix.abi.target_jdk }}-jdk${{ github.event.inputs.jdk_major || '17' }}
+          path: |
+            build-android-jdk/out/**
+            build-android-jdk/images/**
+            
