@@ -47,17 +47,27 @@ jobs:
           unzip -q ndk.zip
           echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r10e" >> "$GITHUB_ENV"
 
-      - name: Force NDK toolchain script to python2
-        run: |
-          set -euxo pipefail
-          if [ -f "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" ]; then
-            sed -i 's@/usr/bin/env python@/usr/bin/env python2@' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
-            sed -i 's/\<python\>/python2/g' "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" || true
-          fi
-
       - name: Clone Android OpenJDK build scripts
         run: |
           git clone --depth=1 https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch.git build-android-jdk
+
+      - name: Prepare NDK path expected by scripts + force python2
+        run: |
+          set -euxo pipefail
+          # Ensure scripts can find the NDK at ./android-ndk-r10e
+          rm -rf build-android-jdk/android-ndk-r10e
+          ln -s "$ANDROID_NDK_HOME" build-android-jdk/android-ndk-r10e
+          # Force python2 in the standalone toolchain script (both real and symlinked path)
+          for f in \
+            "$ANDROID_NDK_HOME/build/tools/make-standalone-toolchain.sh" \
+            "build-android-jdk/android-ndk-r10e/build/tools/make-standalone-toolchain.sh"
+          do
+            if [ -f "$f" ]; then
+              sed -i 's@/usr/bin/env python@/usr/bin/env python2@' "$f" || true
+              sed -i 's/\<python\>/python2/g' "$f" || true
+            fi
+          done
+          ls -l build-android-jdk/android-ndk-r10e/build/tools/make-standalone-toolchain.sh || true
 
       - name: Build JDK 17 (aarch64)
         working-directory: build-android-jdk
@@ -73,7 +83,7 @@ jobs:
           PYTHON: /usr/bin/python2
         run: |
           set -euxo pipefail
-          # We already downloaded and extracted the NDK, so do not run ./extractndk.sh
+          # We already downloaded and linked the NDK, so skip ./extractndk.sh
           ./maketoolchain.sh
           ./getlibs.sh
           ./buildlibs.sh
